@@ -227,6 +227,41 @@ export function renderInteraction(question, response = {}, result = null) {
   return '<div class="flash error">Dieser Fragentyp kann im Lernclient noch nicht automatisch dargestellt werden.</div>';
 }
 
+export function correctResponse(question) {
+  const answer = question.answer || {};
+  if (['single_choice', 'multiple_choice'].includes(question.type)) {
+    return {choice: (answer.options || []).map((option, index) => option.correct ? String(index) : null).filter(value => value !== null)};
+  }
+  if (question.type === 'choice_matrix') {
+    return Object.fromEntries((answer.groups || []).map((group, index) => [
+      `group_${index}`,
+      [String((group.options || []).findIndex(option => option.correct))],
+    ]));
+  }
+  if (question.type === 'cloze') {
+    let index = 0;
+    return Object.fromEntries((answer.segments || []).filter(segment => segment.kind === 'gap').map(segment => [
+      `gap_${index++}`,
+      [String((segment.answers || [])[0] || '')],
+    ]));
+  }
+  if (question.type === 'matching') {
+    return Object.fromEntries((answer.left || []).map((left, index) => [
+      `match_${index}`,
+      (answer.pairs || []).filter(pair => normalizeText(pair.left) === normalizeText(left)).map(pair => String(pair.right || '')),
+    ]));
+  }
+  if (question.type === 'ordering') {
+    return {order: [(answer.items || []).map((_, index) => index).join(',')]};
+  }
+  return {};
+}
+
+export function renderCorrectSolution(question) {
+  const response = correctResponse(question);
+  return renderInteraction(question, response, evaluateAnswer(question, response));
+}
+
 export function collectResponse(container, question) {
   const response = {};
   if (['single_choice', 'multiple_choice'].includes(question.type)) {

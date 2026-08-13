@@ -4,9 +4,49 @@ export const STARTING_EASE = 2.30;
 export const MINIMUM_EASE = 1.30;
 export const EASY_BONUS = 1.30;
 export const LAPSE_INTERVAL_MULTIPLIER = 0.10;
+export const DEFAULT_SCHEDULER_SETTINGS = Object.freeze({
+  firstLearningMinutes: 30,
+  secondLearningHours: 2,
+  thirdLearningDays: 2,
+  easyIntervalDays: 4,
+  relearningMinutes: 10,
+});
 
 function iso(date) { return date.toISOString().replace(/\.\d{3}Z$/, 'Z'); }
 function parseDate(value) { const date = value ? new Date(value) : null; return date && !Number.isNaN(date.valueOf()) ? date : null; }
+
+function validDuration(value, fallback, minimum, maximum) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= minimum && number <= maximum ? number : fallback;
+}
+
+export function normalizeSchedulerSettings(value = {}) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const settings = {
+    firstLearningMinutes: validDuration(source.firstLearningMinutes, DEFAULT_SCHEDULER_SETTINGS.firstLearningMinutes, 1, 1440),
+    secondLearningHours: validDuration(source.secondLearningHours, DEFAULT_SCHEDULER_SETTINGS.secondLearningHours, 1, 168),
+    thirdLearningDays: validDuration(source.thirdLearningDays, DEFAULT_SCHEDULER_SETTINGS.thirdLearningDays, 1, 365),
+    easyIntervalDays: validDuration(source.easyIntervalDays, DEFAULT_SCHEDULER_SETTINGS.easyIntervalDays, 1, 365),
+    relearningMinutes: validDuration(source.relearningMinutes, DEFAULT_SCHEDULER_SETTINGS.relearningMinutes, 1, 1440),
+  };
+  if (settings.firstLearningMinutes * 60 >= settings.secondLearningHours * 3600
+      || settings.secondLearningHours * 3600 >= settings.thirdLearningDays * 86400) {
+    settings.firstLearningMinutes = DEFAULT_SCHEDULER_SETTINGS.firstLearningMinutes;
+    settings.secondLearningHours = DEFAULT_SCHEDULER_SETTINGS.secondLearningHours;
+    settings.thirdLearningDays = DEFAULT_SCHEDULER_SETTINGS.thirdLearningDays;
+  }
+  return settings;
+}
+
+function seededOrder(seed, questionId) {
+  const value = `${seed}:${questionId}`;
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
 
 async function deterministicFuzz(questionId, repetitions) {
   const data = new TextEncoder().encode(`${questionId}:${repetitions}`);
@@ -24,8 +64,15 @@ export function defaultCard() {
   };
 }
 
-export async function scheduleReview(questionId, existingCard, rating, answerCorrect, nowDate = new Date()) {
+export async function scheduleReview(questionId, existingCard, rating, answerCorrect, nowDate = new Date(), schedulerSettings = {}) {
   if (!['forgot', 'partial', 'effort', 'easy'].includes(rating)) throw new Error('Ungültige Lernbewertung.');
+  const settings = normalizeSchedulerSettings(schedulerSettings);
+  const learningStepsSeconds = [
+    settings.firstLearningMinutes * 60,
+    settings.secondLearningHours * 3600,
+    settings.thirdLearningDays * 86400,
+  ];
+  const relearningSeconds = settings.relearningMinutes * 60;
   const card = existingCard ? {...defaultCard(), ...existingCard} : defaultCard();
   const previousState = card.state || 'new';
   let stepIndex = Number(card.stepIndex || 0);
@@ -40,27 +87,27 @@ export async function scheduleReview(questionId, existingCard, rating, answerCor
   let delay;
 
   if (['new', 'learning'].includes(previousState)) {
-    const current = Math.max(0, Math.min(stepIndex, LEARNING_STEPS_SECONDS.length - 1));
+    const current = Math.max(0, Math.min(stepIndex, learningStepsSeconds.length - 1));
     if (rating === 'forgot') {
-      nextState = 'learning'; nextStep = 0; delay = LEARNING_STEPS_SECONDS[0];
+      nextState = 'learning'; nextStep = 0; delay = learningStepsSeconds[0];
     } else if (rating === 'partial') {
-      nextState = 'learning'; nextStep = current; delay = Math.max(5 * 60, Math.floor(LEARNING_STEPS_SECONDS[current] / 2));
+      nextState = 'learning'; nextStep = current; delay = Math.max(5 * 60, Math.floor(learningStepsSeconds[current] / 2));
     } else if (rating === 'effort') {
-      if (current + 1 < LEARNING_STEPS_SECONDS.length) {
-        nextState = 'learning'; nextStep = current + 1; delay = LEARNING_STEPS_SECONDS[current + 1];
+      if (current + 1 < learningStepsSeconds.length) {
+        nextState = 'learning'; nextStep = current + 1; delay = learningStepsSeconds[current + 1];
       } else {
         nextState = 'review'; nextStep = 0;
-        nextInterval = Math.max(1, (LEARNING_STEPS_SECONDS[current] / 86400) * ease);
+        nextInterval = Math.max(1, (learningStepsSeconds[current] / 86400) * ease);
         delay = Math.floor(nextInterval * 86400);
       }
     } else {
-      nextState = 'review'; nextStep = 0; nextInterval = 4; ease += 0.15; delay = Math.floor(nextInterval * 86400);
+      nextState = 'review'; nextStep = 0; nextInterval = settings.easyIntervalDays; ease += 0.15; delay = Math.floor(nextInterval * 86400);
     }
   } else if (previousState === 'relearning') {
     if (rating === 'forgot') {
-      nextState = 'relearning'; nextStep = 0; delay = RELEARNING_STEPS_SECONDS[0];
+      nextState = 'relearning'; nextStep = 0; delay = relearningSeconds;
     } else if (rating === 'partial') {
-      nextState = 'relearning'; nextStep = 0; delay = Math.max(5 * 60, Math.floor(RELEARNING_STEPS_SECONDS[0] / 2));
+      nextState = 'relearning'; nextStep = 0; delay = Math.max(5 * 60, Math.floor(relearningSeconds / 2));
     } else {
       nextState = 'review'; nextStep = 0;
       if (rating === 'easy') { nextInterval = Math.max(1, intervalDays * EASY_BONUS); ease += 0.15; }
@@ -73,7 +120,7 @@ export async function scheduleReview(questionId, existingCard, rating, answerCor
     if (rating === 'forgot') {
       ease = Math.max(MINIMUM_EASE, ease - 0.20); lapses += 1;
       nextInterval = Math.max(1, intervalDays * LAPSE_INTERVAL_MULTIPLIER);
-      nextState = 'relearning'; nextStep = 0; delay = RELEARNING_STEPS_SECONDS[0];
+      nextState = 'relearning'; nextStep = 0; delay = relearningSeconds;
     } else {
       let factor, divider;
       if (rating === 'partial') { factor = 1.20; divider = 4; ease = Math.max(MINIMUM_EASE, ease - 0.15); }
@@ -127,10 +174,11 @@ export function learningStats(workspace, now = new Date()) {
   };
 }
 
-export function nextQuestion(workspace, requestedId = null, now = new Date()) {
+export function nextQuestion(workspace, requestedId = null, now = new Date(), sessionSeed = '') {
   if (!workspace) return null;
   const byId = new Map(workspace.questions.map(question => [question.id, question]));
   if (requestedId && byId.has(requestedId)) return byId.get(requestedId);
+  const compareSessionOrder = (a, b) => seededOrder(sessionSeed, a.id) - seededOrder(sessionSeed, b.id) || String(a.id).localeCompare(String(b.id));
   const due = workspace.questions
     .filter(question => {
       const card = workspace.cards?.[question.id];
@@ -139,15 +187,18 @@ export function nextQuestion(workspace, requestedId = null, now = new Date()) {
     .sort((a, b) => {
       const order = {relearning: 0, learning: 1, review: 2};
       const ca = workspace.cards[a.id], cb = workspace.cards[b.id];
-      return (order[ca.state] ?? 9) - (order[cb.state] ?? 9) || String(ca.dueAt).localeCompare(String(cb.dueAt));
+      const dueWindowA = Math.floor(new Date(ca.dueAt).getTime() / 3600000);
+      const dueWindowB = Math.floor(new Date(cb.dueAt).getTime() / 3600000);
+      return (order[ca.state] ?? 9) - (order[cb.state] ?? 9)
+        || dueWindowA - dueWindowB
+        || compareSessionOrder(a, b);
     });
   if (due.length) return due[0];
-  return workspace.questions.find(question => {
-    const card = workspace.cards?.[question.id];
-    return !card || (!card.suspended && card.state === 'new');
-  }) || null;
-}
-
-export function ratingLabel(rating) {
-  return ({forgot: 'Vergessen', partial: 'Teilweise', effort: 'Mit Anstrengung', easy: 'Leicht'})[rating] || rating;
+  const newQuestions = workspace.questions
+    .filter(question => {
+      const card = workspace.cards?.[question.id];
+      return !card || (!card.suspended && card.state === 'new');
+    })
+    .sort(compareSessionOrder);
+  return newQuestions[0] || null;
 }

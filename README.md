@@ -1,44 +1,60 @@
 # Lernclient
 
-Rein statischer Lernclient. Keine Serverlogik, keine Accounts, keine zentrale Nutzerdatenbank.
+Statischer Lernclient für lokale Fragensammlungen und Spaced Repetition. Die Anwendung läuft vollständig im Browser und benötigt weder Serverlogik noch Nutzerkonten oder eine zentrale Datenbank.
 
-## Betrieb
+## Funktionen
 
-Die Dateien können direkt auf GitHub Pages veröffentlicht werden. Es gibt keinen Build-Schritt.
+- Import und Aktualisierung von `.lernbank`-Fragensammlungen
+- Single Choice, Multiple Choice, Matrix, Lückentext, Zuordnung und Sortieraufgaben
+- Spaced Repetition mit konfigurierbaren Lern- und Wiederholungszeiten
+- Live-Suche über Fragen und Lösungen mit Typ-, Punktzahl- und Lernstandfiltern
+- Anzeige und Anpassung einzelner Wiederholungstermine
+- Zurücksetzen einzelner Fragen oder des gesamten Lernfortschritts
+- mehrere lokal gespeicherte Fragensammlungen
+- Export und Wiederherstellung des vollständigen Lernstands als `.lernbackup`
 
-Lokaler Test:
+## Lokal starten
+
+Da JavaScript-Module verwendet werden, sollte der Client über einen lokalen HTTP-Server und nicht direkt als Datei geöffnet werden.
+
+Im Verzeichnis dieses Repositorys:
 
 ```bash
-cd ..
 python -m http.server 8000
 ```
 
-Dann `http://localhost:8000/learning-client/` öffnen.
+Danach ist der Client unter `http://localhost:8000/` erreichbar.
 
-## Daten
+## Deployment
+
+Der Lernclient benötigt keinen Build-Schritt. Für das Deployment wird der vollständige Inhalt dieses Repositorys unverändert auf einem statischen Webhost veröffentlicht. Die Verzeichnisstruktur von `index.html`, `css/` und `js/` muss dabei erhalten bleiben.
+
+### GitHub Pages
+
+1. Repository zu GitHub pushen.
+2. Unter **Settings → Pages** als Quelle **Deploy from a branch** auswählen.
+3. Den gewünschten Branch und als Verzeichnis **/ (root)** festlegen.
+4. Nach dem abgeschlossenen Deployment die von GitHub Pages angezeigte URL öffnen.
+
+Die Anwendung verwendet relative Asset-Pfade und Hash-Routing. Sie kann daher sowohl auf einer eigenen Domain als auch in einem Unterverzeichnis wie `/lernclient/` bereitgestellt werden.
+
+### Andere statische Webhosts
+
+Alternativ kann der Repository-Inhalt auf jedem Host für statische Dateien veröffentlicht werden, beispielsweise über einen einfachen Webserver, Object Storage oder einen Static-Site-Dienst. Besondere Rewrite-Regeln oder serverseitige Funktionen sind nicht erforderlich.
+
+## Lokale Daten und Backups
+
+Fragensammlungen, Einstellungen und Lernfortschritt werden in IndexedDB im jeweiligen Browser gespeichert. Es gibt keine Cloud-Synchronisierung und keine automatische Backup-Datei.
+
+Nutzer sollten nach jeder Lernsitzung selbst ein aktuelles `.lernbackup` herunterladen. Nur damit kann der Lernstand nach gelöschten Browserdaten oder auf einem anderen Gerät beziehungsweise in einem anderen Browser fortgesetzt werden.
 
 - `.lernbank`: Fragensammlung importieren oder aktualisieren
-- `.lernbackup`: kompletten persönlichen Stand wiederherstellen
-- IndexedDB: automatische lokale Speicherung zwischen Sitzungen
+- `.lernbackup`: Fragensammlung, Einstellungen und persönlichen Lernstand sichern oder wiederherstellen
 
-Der Client unterstützt aktuell:
+Diese Dateitypen sind über `.gitignore` vom Repository ausgeschlossen und sollten nicht zusammen mit dem Client veröffentlicht werden.
 
-- Single Choice
-- Multiple Choice
-- Choice Matrix
-- Lückentext
-- Zuordnung per Drag & Drop
-- Zuordnung mit Linien
-- Sortieraufgaben
-- Spaced Repetition
-- Fragenbrowser mit Volltextsuche über Fragen und Lösungen
-- mehrere lokal gespeicherte Fragensammlungen
-- Export eines vollständigen `.lernbackup`
+## Datenschutz
 
-## GitHub Pages ohne öffentliche Fragensammlung
+Importierte Dateien werden direkt im Browser verarbeitet und nicht an einen Anwendungsserver übertragen.
 
-Für GitHub Pages wird **nur der Inhalt dieses Ordners** veröffentlicht. `.lernbank`- und `.lernbackup`-Dateien gehören nicht ins Repository.
-
-Die Nutzer erhalten ihre `.lernbank` weiterhin separat, z. B. über Discord, und wählen sie im Browser aus. Die Datei wird direkt im Browser gelesen und in IndexedDB gespeichert; der Lernclient besitzt keinen Upload-Endpunkt.
-
-Hinweis zu Bildern: Falls eine Frage nur eine externe Bild-URL enthält, lädt der Browser dieses Bild direkt von der angegebenen Quelle. Der Client sendet dabei keinen Referrer, die Bildquelle sieht technisch aber weiterhin die IP-Adresse des abrufenden Nutzers. Für vollständig offline eingebettete Bilder könnte das Build-System später optional Assets in die `.lernbank` einbetten.
+Enthält eine Frage eine externe Bild-URL, lädt der Browser das Bild direkt von dieser Quelle. Dabei wird kein Referrer gesendet; die externe Quelle kann technisch weiterhin die IP-Adresse des Nutzers sehen.
