@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Lerndatenbank</title>
+  <link rel="stylesheet" href="./css/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="shell topbar-inner">
+      <a class="brand" href="#/">Lerndatenbank</a>
+      <nav id="main-nav" aria-label="Hauptnavigation"></nav>
+    </div>
+  </header>
+  <main id="app" class="shell" aria-live="polite"></main>
+  <footer class="shell">Lerndatenbank Lernclient · Fragen und Lernfortschritt bleiben im Browser</footer>
+  <input id="bank-file-input" type="file" accept=".lernbank,application/json" hidden>
+  <input id="backup-file-input" type="file" accept=".lernbackup,application/json" hidden>
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>
