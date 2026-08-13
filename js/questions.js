@@ -4,6 +4,58 @@ function escapeHtml(value) {
     .replaceAll('"', '&quot;').replaceAll("'", '&#039;');
 }
 
+const PROMPT_BLOCK_ELEMENTS = new Set([
+  'ADDRESS', 'ARTICLE', 'ASIDE', 'BLOCKQUOTE', 'DIV', 'DL', 'FIELDSET',
+  'FIGCAPTION', 'FIGURE', 'FOOTER', 'FORM', 'H1', 'H2', 'H3', 'H4', 'H5',
+  'H6', 'HEADER', 'HR', 'LI', 'MAIN', 'NAV', 'OL', 'P', 'PRE', 'SECTION',
+  'TABLE', 'TR', 'UL',
+]);
+
+function structuredTextFromHtml(html) {
+  if (!html || typeof document === 'undefined') return '';
+  const template = document.createElement('template');
+  template.innerHTML = String(html);
+  let output = '';
+  const newline = () => {
+    if (output && !output.endsWith('\n')) output += '\n';
+  };
+  const visit = node => {
+    if (node.nodeType === 3) {
+      output += node.nodeValue || '';
+      return;
+    }
+    if (node.nodeType !== 1) return;
+    if (node.tagName === 'BR') {
+      newline();
+      return;
+    }
+    const isBlock = PROMPT_BLOCK_ELEMENTS.has(node.tagName);
+    if (isBlock) newline();
+    node.childNodes.forEach(visit);
+    if (isBlock) newline();
+  };
+  template.content.childNodes.forEach(visit);
+  return output
+    .replaceAll('\u00a0', ' ')
+    .split('\n')
+    .map(line => line.replace(/[ \t]+/g, ' ').trim())
+    .filter(Boolean)
+    .join('\n');
+}
+
+function contentWithoutWhitespace(value) {
+  return String(value ?? '').replace(/\s+/gu, '');
+}
+
+export function displayPromptText(question) {
+  const text = String(question?.prompt?.text || '');
+  const structured = structuredTextFromHtml(question?.prompt?.html);
+  if (structured.includes('\n') && contentWithoutWhitespace(structured) === contentWithoutWhitespace(text)) {
+    return structured;
+  }
+  return text;
+}
+
 export function normalizeText(value) {
   return String(value ?? '').normalize('NFKC').replace(/\u00a0/g, ' ').replace(/\u200b/g, '').toLocaleLowerCase('de').trim().replace(/\s+/g, ' ');
 }

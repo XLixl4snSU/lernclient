@@ -32,3 +32,4 @@ code{background:#edf2f0;padding:1px 5px;border-radius:4px;font-family:ui-monospa
 
 .question-assets { margin: 18px 0; display: grid; gap: 12px; justify-items: center; }
 .question-asset { display: block; max-width: min(100%, 760px); max-height: 520px; object-fit: contain; border-radius: 8px; }
+.question-prompt, .browser-item-title, .browser-detail-prompt { white-space: pre-line; }

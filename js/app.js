@@ -9,7 +9,7 @@ import {
 } from './scheduler.js';
 import {
   renderInteraction, collectResponse, evaluateAnswer, renderFeedback,
-  renderCorrectSolution, wireQuestionInteractions, searchableText,
+  displayPromptText, renderCorrectSolution, wireQuestionInteractions, searchableText,
 } from './questions.js';
 
 const app = document.getElementById('app');
@@ -130,7 +130,7 @@ function learningQuestion(requestedId = null) {
   const status = card?.state || 'new';
   shell(`<section class="learning-shell">
     <div class="learning-topline"><div class="question-meta"><span class="question-meta-strong">Aufgabe · ${escapeHtml(pointsLabel(question.points))}</span><span class="chip">${escapeHtml(typeLabel(question.type))}</span><span class="chip">${escapeHtml(stateLabel(status))}</span>${card?.dueAt ? `<span class="chip">fällig ${escapeHtml(formatDue(card.dueAt))}</span>` : ''}</div><a href="#/learn" class="quiet-link">Sitzung verlassen</a></div>
-    <article class="card learning-card"><div class="question-instruction">${escapeHtml(question.instruction || '')}</div><div class="question-prompt">${escapeHtml(question.prompt?.text || '(Frage ohne Text)')}</div>${renderQuestionAssets(question)}
+    <article class="card learning-card"><div class="question-instruction">${escapeHtml(question.instruction || '')}</div><div class="question-prompt">${escapeHtml(displayPromptText(question) || '(Frage ohne Text)')}</div>${renderQuestionAssets(question)}
       <div id="question-interaction">${renderInteraction(question, response, result)}</div>${renderFeedback(question, result)}
       ${result ? renderRatings(question, result) : '<div class="learning-actions"><button id="check-answer" class="button" type="button">Antwort prüfen</button></div>'}
     </article></section>`);
@@ -170,7 +170,7 @@ function renderRatings(question, result) {
 
 function renderQuestionBrowserItem(question) {
   const card = workspace.cards?.[question.id];
-  return `<article class="browser-item"><div class="browser-item-head"><div><h3 class="browser-item-title">${escapeHtml(question.prompt?.text || '(Frage ohne Text)')}</h3><div class="browser-item-meta"><span class="chip">${escapeHtml(typeLabel(question.type))}</span><span class="chip">${escapeHtml(pointsLabel(question.points))}</span><span class="chip">${escapeHtml(stateLabel(card?.state || 'new'))}</span>${card?.dueAt ? `<span class="chip">fällig ${escapeHtml(formatDue(card.dueAt))}</span>` : ''}</div></div><a class="button secondary small" href="#/question/${encodeURIComponent(question.id)}">Öffnen</a></div>
+  return `<article class="browser-item"><div class="browser-item-head"><div><h3 class="browser-item-title">${escapeHtml(displayPromptText(question) || '(Frage ohne Text)')}</h3><div class="browser-item-meta"><span class="chip">${escapeHtml(typeLabel(question.type))}</span><span class="chip">${escapeHtml(pointsLabel(question.points))}</span><span class="chip">${escapeHtml(stateLabel(card?.state || 'new'))}</span>${card?.dueAt ? `<span class="chip">fällig ${escapeHtml(formatDue(card.dueAt))}</span>` : ''}</div></div><a class="button secondary small" href="#/question/${encodeURIComponent(question.id)}">Öffnen</a></div>
     <details class="browser-solution"><summary>Korrekte Lösung anzeigen</summary><div class="browser-solution-content">${renderCorrectSolution(question)}</div></details></article>`;
 }
 
@@ -313,7 +313,7 @@ function questionDetail(id) {
   const question = workspace.questions.find(item => item.id === id);
   if (!question) return notFound();
   const card = workspace.cards?.[question.id];
-  shell(`<section class="hero"><div><div class="eyebrow">Fragenbrowser</div><h1>Frage</h1></div><div class="hero-actions"><a class="button secondary" href="#/questions">← Zur Suche</a><a class="button" href="#/learn/${encodeURIComponent(question.id)}">Im Lernmodus öffnen</a></div></section><section class="question-detail-grid"><article class="card"><div class="browser-item-meta"><span class="chip">${escapeHtml(typeLabel(question.type))}</span><span class="chip">${escapeHtml(pointsLabel(question.points))}</span><span class="chip">${escapeHtml(stateLabel(card?.state || 'new'))}</span>${card?.dueAt ? `<span class="chip">fällig ${escapeHtml(formatDue(card.dueAt))}</span>` : ''}</div><div class="browser-detail-prompt">${escapeHtml(question.prompt?.text || '(Frage ohne Text)')}</div>${renderQuestionAssets(question)}${question.instruction?`<div class="note instruction-note">${escapeHtml(question.instruction)}</div>`:''}</article><aside class="card browser-detail-solution-card"><h2>Korrekte Lösung</h2><div id="detail-correct-solution" class="browser-solution-content">${renderCorrectSolution(question)}</div></aside></section><section class="card question-progress-card"><h2>Lernstand und Fälligkeit</h2>${renderQuestionProgressControls(question)}</section>`);
+  shell(`<section class="hero"><div><div class="eyebrow">Fragenbrowser</div><h1>Frage</h1></div><div class="hero-actions"><a class="button secondary" href="#/questions">← Zur Suche</a><a class="button" href="#/learn/${encodeURIComponent(question.id)}">Im Lernmodus öffnen</a></div></section><section class="question-detail-grid"><article class="card"><div class="browser-item-meta"><span class="chip">${escapeHtml(typeLabel(question.type))}</span><span class="chip">${escapeHtml(pointsLabel(question.points))}</span><span class="chip">${escapeHtml(stateLabel(card?.state || 'new'))}</span>${card?.dueAt ? `<span class="chip">fällig ${escapeHtml(formatDue(card.dueAt))}</span>` : ''}</div><div class="browser-detail-prompt">${escapeHtml(displayPromptText(question) || '(Frage ohne Text)')}</div>${renderQuestionAssets(question)}${question.instruction?`<div class="note instruction-note">${escapeHtml(question.instruction)}</div>`:''}</article><aside class="card browser-detail-solution-card"><h2>Korrekte Lösung</h2><div id="detail-correct-solution" class="browser-solution-content">${renderCorrectSolution(question)}</div></aside></section><section class="card question-progress-card"><h2>Lernstand und Fälligkeit</h2>${renderQuestionProgressControls(question)}</section>`);
   wireQuestionInteractions(document.getElementById('detail-correct-solution'));
   wireQuestionProgressControls(document.querySelector('.question-progress-card'), () => questionDetail(id));
 }
