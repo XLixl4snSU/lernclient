@@ -210,27 +210,43 @@ function deterministicInitialOrder(length, seedText) {
   return values;
 }
 
-function renderChoice(question, response, result) {
+function shuffledIndices(length, presentationSeed, scope) {
+  const original = Array.from({length}, (_, index) => index);
+  if (!presentationSeed || length < 2) return original;
+  const shuffled = deterministicInitialOrder(length, `${presentationSeed}\u0000${scope}`);
+  if (shuffled.every((value, index) => value === index)) shuffled.push(shuffled.shift());
+  return shuffled;
+}
+
+function shuffledValues(values, presentationSeed, scope) {
+  return shuffledIndices(values.length, presentationSeed, scope).map(index => values[index]);
+}
+
+function renderChoice(question, response, result, presentationSeed) {
   const multiple = question.type === 'multiple_choice';
   const selected = new Set(responseMany(response, 'choice').map(Number));
-  return `<div class="choice-list">${(question.answer.options || []).map((option, index) => {
-    const isSelected = selected.has(index);
+  const options = question.answer.options || [];
+  return `<div class="choice-list">${shuffledIndices(options.length, presentationSeed, 'choice').map(optionIndex => {
+    const option = options[optionIndex];
+    const isSelected = selected.has(optionIndex);
     let cls = '';
     if (result && (isSelected || option.correct)) cls = option.correct ? 'is-correct' : 'is-wrong';
     return `<label class="choice-option ${cls}">
-      <input type="${multiple ? 'checkbox' : 'radio'}" name="choice" value="${index}" ${isSelected ? 'checked' : ''} ${result ? 'disabled' : ''}>
+      <input type="${multiple ? 'checkbox' : 'radio'}" name="choice" value="${optionIndex}" ${isSelected ? 'checked' : ''} ${result ? 'disabled' : ''}>
       <span class="choice-control"></span><span>${escapeHtml(option.text)}</span>
       ${result && option.correct ? '<span class="answer-mark">✓</span>' : result && isSelected ? '<span class="answer-mark">×</span>' : ''}
     </label>`;
   }).join('')}</div>`;
 }
 
-function renderMatrix(question, response, result) {
+function renderMatrix(question, response, result, presentationSeed) {
   return `<div class="matrix-list">${(question.answer.groups || []).map((group, groupIndex) => {
     const selected = responseOne(response, `group_${groupIndex}`);
     const expected = (group.options || []).findIndex(option => option.correct);
     const heading = group.prompt ? `<div class="matrix-prompt">${escapeHtml(group.prompt)}</div>` : '';
-    return `<section class="matrix-group">${heading}<div class="choice-list compact">${(group.options || []).map((option, optionIndex) => {
+    const options = group.options || [];
+    return `<section class="matrix-group">${heading}<div class="choice-list compact">${shuffledIndices(options.length, presentationSeed, `matrix:${groupIndex}`).map(optionIndex => {
+      const option = options[optionIndex];
       const isSelected = String(optionIndex) === selected;
       const cls = result && (isSelected || option.correct) ? (option.correct ? 'is-correct' : 'is-wrong') : '';
       return `<label class="choice-option ${cls}"><input type="radio" name="group_${groupIndex}" value="${optionIndex}" ${isSelected ? 'checked' : ''} ${result ? 'disabled' : ''}><span class="choice-control"></span><span>${escapeHtml(option.text)}</span>${result && optionIndex === expected ? '<span class="answer-mark">✓</span>' : result && isSelected ? '<span class="answer-mark">×</span>' : ''}</label>`;
@@ -238,7 +254,7 @@ function renderMatrix(question, response, result) {
   }).join('')}</div>`;
 }
 
-function renderCloze(question, response, result) {
+function renderCloze(question, response, result, presentationSeed) {
   let gapIndex = 0;
   const segments = (question.answer.segments || []).map(segment => {
     if (segment.kind === 'text') return escapeHtml(segment.text || '');
@@ -249,7 +265,8 @@ function renderCloze(question, response, result) {
     const cls = detail ? resultClass(detail.correct) : '';
     const options = segment.options || [];
     if (segment.inputMode === 'select' && options.length) {
-      return `<span class="cloze-wrap ${cls}"><select name="gap_${index}" ${result ? 'disabled' : ''}><option value="">–</option>${options.map(option => `<option value="${escapeHtml(option)}" ${value === String(option) ? 'selected' : ''}>${escapeHtml(option)}</option>`).join('')}</select></span>`;
+      const presentedOptions = shuffledValues(options, presentationSeed, `cloze:${index}`);
+      return `<span class="cloze-wrap ${cls}"><select name="gap_${index}" ${result ? 'disabled' : ''}><option value="">–</option>${presentedOptions.map(option => `<option value="${escapeHtml(option)}" ${value === String(option) ? 'selected' : ''}>${escapeHtml(option)}</option>`).join('')}</select></span>`;
     }
     return `<span class="cloze-wrap ${cls}"><input type="text" name="gap_${index}" value="${escapeHtml(value)}" autocomplete="off" ${result ? 'disabled' : ''}></span>`;
   }).join('');
@@ -261,12 +278,14 @@ function renderCloze(question, response, result) {
   return `<div class="cloze-flow">${segments}</div>${correctText}`;
 }
 
-function renderDragMatch(question, response, result) {
+function renderDragMatch(question, response, result, presentationSeed) {
   const answer = question.answer || {};
   const assigned = new Set((answer.left || []).map((_, index) => responseOne(response, `match_${index}`)).filter(Boolean));
-  const available = (answer.right || []).filter(value => !assigned.has(value));
+  const leftOrder = shuffledIndices((answer.left || []).length, presentationSeed, 'matching:left');
+  const available = shuffledValues(answer.right || [], presentationSeed, 'matching:right').filter(value => !assigned.has(value));
   return `<div class="learning-drag-match" data-checked="${result ? '1' : '0'}">
-    <div class="match-grid">${(answer.left || []).map((left, index) => {
+    <div class="match-grid">${leftOrder.map(index => {
+      const left = answer.left[index];
       const value = responseOne(response, `match_${index}`);
       const detail = result?.details?.[index];
       const cls = detail ? (detail.correct ? 'is-correct' : 'is-wrong') : '';
@@ -280,34 +299,47 @@ function renderDragMatch(question, response, result) {
   </div>`;
 }
 
-function renderLineMatch(question, response, result) {
+function renderLineMatch(question, response, result, presentationSeed) {
   const answer = question.answer || {};
   const right = answer.right || [];
+  const leftOrder = shuffledIndices((answer.left || []).length, presentationSeed, 'matching:left');
+  const rightOrder = shuffledIndices(right.length, presentationSeed, 'matching:right');
+  const pairedLeft = new Set((answer.pairs || []).map(pair => normalizeText(pair.left)));
+  const pairedRight = new Set((answer.pairs || []).map(pair => normalizeText(pair.right)));
   return `<div class="learning-line-match" data-checked="${result ? '1' : '0'}">
+    ${result ? '' : '<p class="interaction-hint">Mehrere Linien pro Karte sind auf beiden Seiten möglich. Wähle für jede Linie zuerst die linke und danach die rechte Karte.</p>'}
     <svg class="line-surface" aria-hidden="true"></svg>
     <div class="line-columns">
-      <div class="line-left-column">${(answer.left || []).map((left, index) => {
+      <div class="line-left-column">${leftOrder.map(index => {
+        const left = answer.left[index];
         const currentValues = responseMany(response, `match_${index}`).filter(Boolean);
         const currentIndices = currentValues.map(value => right.findIndex(item => normalizeText(item) === normalizeText(value))).filter(value => value >= 0);
         const detail = result?.details?.[index];
         const expectedLabels = Array.isArray(detail?.expected) ? detail.expected : detail?.expected ? [detail.expected] : [];
         const correctIndices = expectedLabels.map(value => right.findIndex(item => normalizeText(item) === normalizeText(value))).filter(value => value >= 0);
-        return `<button type="button" class="line-node line-left ${result && detail ? (detail.correct ? 'is-correct' : 'is-wrong') : ''}" data-left-index="${index}" data-current-indices="${currentIndices.join(',')}" data-correct-indices="${correctIndices.join(',')}" ${result ? 'disabled' : ''}><span>${escapeHtml(left)}</span><span class="line-port"></span></button>`;
+        const unmatched = !pairedLeft.has(normalizeText(left));
+        return `<button type="button" class="line-node line-left ${result && detail ? (detail.correct ? 'is-correct' : 'is-wrong') : ''} ${result && unmatched ? 'is-unmatched' : ''}" data-left-index="${index}" data-current-indices="${currentIndices.join(',')}" data-correct-indices="${correctIndices.join(',')}" ${result ? 'disabled' : ''}><span>${escapeHtml(left)}</span>${result && unmatched ? '<span class="line-unmatched-label">ohne Zuordnung</span>' : ''}<span class="line-port"></span></button>`;
       }).join('')}</div>
-      <div class="line-right-column">${right.map((value, index) => `<button type="button" class="line-node line-right" data-right-index="${index}" data-value="${escapeHtml(value)}" ${result ? 'disabled' : ''}><span class="line-port"></span><span>${escapeHtml(value)}</span></button>`).join('')}</div>
+      <div class="line-right-column">${rightOrder.map(index => {
+        const value = right[index];
+        const unmatched = !pairedRight.has(normalizeText(value));
+        return `<button type="button" class="line-node line-right ${result && unmatched ? 'is-unmatched' : ''}" data-right-index="${index}" data-value="${escapeHtml(value)}" ${result ? 'disabled' : ''}><span class="line-port"></span><span>${escapeHtml(value)}</span>${result && unmatched ? '<span class="line-unmatched-label">ohne Zuordnung</span>' : ''}</button>`;
+      }).join('')}</div>
     </div>
     ${result ? '' : '<div class="line-tools"><button type="button" class="button secondary small line-clear">Alle Zuordnungen löschen</button></div>'}
   </div>`;
 }
 
-function renderMatching(question, response, result) {
-  return question.answer?.interaction === 'lines' ? renderLineMatch(question, response, result) : renderDragMatch(question, response, result);
+function renderMatching(question, response, result, presentationSeed) {
+  return question.answer?.interaction === 'lines'
+    ? renderLineMatch(question, response, result, presentationSeed)
+    : renderDragMatch(question, response, result, presentationSeed);
 }
 
-function renderOrdering(question, response, result) {
+function renderOrdering(question, response, result, presentationSeed) {
   const items = question.answer.items || [];
   let order = responseOne(response, 'order').split(',').filter(value => /^\d+$/.test(value)).map(Number);
-  if (!order.length) order = deterministicInitialOrder(items.length, question.id);
+  if (!order.length) order = shuffledIndices(items.length, presentationSeed, 'ordering');
   return `<div class="ordering-wrap"><div class="sortable-list" data-checked="${result ? '1' : '0'}">${order.map((itemIndex, position) => {
     const detail = result?.details?.[position];
     const cls = detail ? (detail.correct ? 'is-correct' : 'is-wrong') : '';
@@ -315,7 +347,7 @@ function renderOrdering(question, response, result) {
   }).join('')}</div><input type="hidden" name="order" value="${order.join(',')}"></div>`;
 }
 
-function renderImageDragDrop(question, response, result) {
+function renderImageDragDrop(question, response, result, presentationSeed) {
   const answer = question.answer || {};
   const imageAsset = (question.assets || []).find(asset => asset.id === answer.imageAssetId);
   const source = resolveAsset(imageAsset);
@@ -329,20 +361,21 @@ function renderImageDragDrop(question, response, result) {
     const detail = result?.details?.find(item => item.targetId === targetId);
     const cls = detail ? (detail.correct ? 'is-correct' : 'is-wrong') : '';
     const expected = result && detail && !detail.correct ? `<span class="image-drop-expected">richtig: ${escapeHtml(detail.expected || 'leer')}</span>` : '';
-    return `<button type="button" class="image-drop-target ${itemId ? 'has-value' : ''} ${cls}" data-image-target-id="${escapeHtml(targetId)}" data-image-item-id="${escapeHtml(itemId)}" style="left:${Number(target.x) * 100}%;top:${Number(target.y) * 100}%;width:${Number(target.width) * 100}%;height:${Number(target.height) * 100}%" ${result ? 'disabled' : ''}><span class="image-drop-value">${itemId ? escapeHtml(items.get(itemId) || itemId) : `<span class="image-drop-empty">${index + 1}</span>`}</span>${expected}</button>`;
+    return `<button type="button" class="image-drop-target ${itemId ? 'has-value' : ''} ${cls}" data-image-target-id="${escapeHtml(targetId)}" data-image-item-id="${escapeHtml(itemId)}" data-image-x="${Number(target.x)}" data-image-y="${Number(target.y)}" data-image-width="${Number(target.width)}" data-image-height="${Number(target.height)}" ${result ? 'disabled' : ''}><span class="image-drop-value">${itemId ? escapeHtml(items.get(itemId) || itemId) : `<span class="image-drop-empty">${index + 1}</span>`}</span>${expected}</button>`;
   }).join('');
-  const pool = result ? '' : `<div class="image-item-pool" data-image-item-pool>${(answer.items || []).filter(item => !assigned.has(String(item.id))).map(item => `<button type="button" class="image-drag-item" draggable="true" data-image-item-id="${escapeHtml(item.id)}">${escapeHtml(item.text)}</button>`).join('')}</div>`;
+  const presentedItems = shuffledValues(answer.items || [], presentationSeed, 'image-drag-drop:items');
+  const pool = result ? '' : `<div class="image-item-pool" data-image-item-pool>${presentedItems.filter(item => !assigned.has(String(item.id))).map(item => `<button type="button" class="image-drag-item" draggable="true" data-image-item-id="${escapeHtml(item.id)}">${escapeHtml(item.text)}</button>`).join('')}</div>`;
   const image = source ? `<div class="image-drop-stage"><img src="${escapeHtml(source)}" alt="Interaktionsbild">${targets}</div>` : '<div class="asset-warning">⚠ Das benötigte Interaktionsbild fehlt.</div>';
   return `<div class="image-drag-drop" data-checked="${result ? '1' : '0'}">${image}${result ? '' : '<p class="interaction-hint">Begriff ziehen oder antippen, danach ein Ziel antippen. Ein belegtes Ziel kann erneut gewählt oder geleert werden.</p>'}<h3>Verfügbare Begriffe</h3>${pool}<input type="hidden" name="image_placements" value="${escapeHtml(JSON.stringify(placements))}"></div>`;
 }
 
-export function renderInteraction(question, response = {}, result = null) {
-  if (['single_choice', 'multiple_choice'].includes(question.type)) return renderChoice(question, response, result);
-  if (question.type === 'choice_matrix') return renderMatrix(question, response, result);
-  if (question.type === 'cloze') return renderCloze(question, response, result);
-  if (question.type === 'matching') return renderMatching(question, response, result);
-  if (question.type === 'ordering') return renderOrdering(question, response, result);
-  if (question.type === 'image_drag_drop') return renderImageDragDrop(question, response, result);
+export function renderInteraction(question, response = {}, result = null, presentationSeed = '') {
+  if (['single_choice', 'multiple_choice'].includes(question.type)) return renderChoice(question, response, result, presentationSeed);
+  if (question.type === 'choice_matrix') return renderMatrix(question, response, result, presentationSeed);
+  if (question.type === 'cloze') return renderCloze(question, response, result, presentationSeed);
+  if (question.type === 'matching') return renderMatching(question, response, result, presentationSeed);
+  if (question.type === 'ordering') return renderOrdering(question, response, result, presentationSeed);
+  if (question.type === 'image_drag_drop') return renderImageDragDrop(question, response, result, presentationSeed);
   return '<div class="flash error">Dieser Fragentyp kann im Lernclient noch nicht automatisch dargestellt werden.</div>';
 }
 
@@ -447,7 +480,16 @@ export function solutionLines(question) {
     for (const segment of answer.segments || []) text += segment.kind === 'text' ? segment.text || '' : (segment.answers || []).join(' / ');
     return [text];
   }
-  if (question.type === 'matching') return (answer.pairs || []).map(pair => `${pair.left} → ${pair.right}`);
+  if (question.type === 'matching') {
+    const lines = (answer.pairs || []).map(pair => `${pair.left} → ${pair.right}`);
+    if (answer.interaction === 'lines') {
+      const pairedLeft = new Set((answer.pairs || []).map(pair => normalizeText(pair.left)));
+      const pairedRight = new Set((answer.pairs || []).map(pair => normalizeText(pair.right)));
+      (answer.left || []).filter(value => !pairedLeft.has(normalizeText(value))).forEach(value => lines.push(`${value} → ohne Zuordnung`));
+      (answer.right || []).filter(value => !pairedRight.has(normalizeText(value))).forEach(value => lines.push(`ohne Zuordnung ← ${value}`));
+    }
+    return lines;
+  }
   if (question.type === 'ordering') return (answer.items || []).map((item, index) => `${index + 1}. ${item}`);
   if (question.type === 'image_drag_drop') {
     const items = new Map((answer.items || []).map(item => [String(item.id), String(item.text || '')]));
@@ -469,6 +511,18 @@ export function searchableText(question) {
 }
 
 export function wireQuestionInteractions(container) {
+  container.querySelectorAll('.image-drop-target').forEach(target => {
+    const geometry = {
+      left: Number(target.dataset.imageX),
+      top: Number(target.dataset.imageY),
+      width: Number(target.dataset.imageWidth),
+      height: Number(target.dataset.imageHeight),
+    };
+    Object.entries(geometry).forEach(([property, value]) => {
+      if (Number.isFinite(value)) target.style[property] = `${value * 100}%`;
+    });
+  });
+
   container.querySelectorAll('.sortable-list[data-checked="0"]').forEach(list => {
     const hidden = list.parentElement?.querySelector('input[name="order"]');
     const update = () => {

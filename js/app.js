@@ -21,6 +21,7 @@ let workspace = null;
 let checkedQuestion = null;
 let flash = null;
 let learningSessionSeed = null;
+let activeQuestionPresentation = null;
 
 function createLearningSessionSeed() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
@@ -138,13 +139,17 @@ function learningQuestion(requestedId = null) {
   if (!question) return learnHome();
   const card = workspace.cards?.[question.id];
   const checked = checkedQuestion?.id === question.id ? checkedQuestion : null;
+  if (!activeQuestionPresentation || activeQuestionPresentation.questionId !== question.id) {
+    activeQuestionPresentation = {questionId: question.id, seed: createLearningSessionSeed()};
+  }
+  const presentationSeed = checked?.presentationSeed || activeQuestionPresentation.seed;
   const response = checked?.response || {};
   const result = checked?.result || null;
   const status = card?.state || 'new';
   shell(`<section class="learning-shell">
     <div class="learning-topline"><div class="question-meta"><span class="question-meta-strong">Aufgabe · ${escapeHtml(pointsLabel(question.points))}</span><span class="chip">${escapeHtml(typeLabel(question.type))}</span><span class="chip">${escapeHtml(stateLabel(status))}</span>${card?.dueAt ? `<span class="chip">fällig ${escapeHtml(formatDue(card.dueAt))}</span>` : ''}</div><a href="#/learn" class="quiet-link">Sitzung verlassen</a></div>
     <article class="card learning-card"><div class="question-instruction">${escapeHtml(question.instruction || '')}</div><div class="question-prompt">${escapeHtml(displayPromptText(question) || '(Frage ohne Text)')}</div>${renderQuestionAssets(question)}
-      <div id="question-interaction">${renderInteraction(question, response, result)}</div>${renderFeedback(question, result)}
+      <div id="question-interaction">${renderInteraction(question, response, result, presentationSeed)}</div>${renderFeedback(question, result)}
       ${result ? renderRatings(question, result) : '<div class="learning-actions"><button id="check-answer" class="button" type="button">Antwort prüfen</button></div>'}
     </article></section>`);
   const interaction = document.getElementById('question-interaction');
@@ -152,7 +157,7 @@ function learningQuestion(requestedId = null) {
   if (!result) {
     document.getElementById('check-answer')?.addEventListener('click', () => {
       const responseNow = collectResponse(interaction, question);
-      checkedQuestion = {id: question.id, response: responseNow, result: evaluateAnswer(question, responseNow)};
+      checkedQuestion = {id: question.id, response: responseNow, result: evaluateAnswer(question, responseNow), presentationSeed};
       learningQuestion(question.id);
     });
   } else {
@@ -168,6 +173,7 @@ function learningQuestion(requestedId = null) {
       workspace.reviews = [...(workspace.reviews || []), scheduled.review];
       await saveWorkspace(workspace);
       checkedQuestion = null;
+      activeQuestionPresentation = null;
       learningQuestion();
     }));
   }
@@ -453,7 +459,10 @@ async function route() {
   setAssetStore(workspace?.assets || {});
   const hash = location.hash || '#/';
   const path = hash.slice(1).split('?')[0] || '/';
-  if (path !== '/learn/session' && !path.startsWith('/learn/')) learningSessionSeed = null;
+  if (path !== '/learn/session' && !path.startsWith('/learn/')) {
+    learningSessionSeed = null;
+    activeQuestionPresentation = null;
+  }
   if (path === '/') return dashboard();
   if (path === '/learn') return learnHome();
   if (path === '/learn/session') return learningQuestion();
@@ -464,5 +473,5 @@ async function route() {
   return notFound();
 }
 
-window.addEventListener('hashchange', () => { checkedQuestion = null; route(); });
+window.addEventListener('hashchange', () => { checkedQuestion = null; activeQuestionPresentation = null; route(); });
 window.addEventListener('DOMContentLoaded', route);
