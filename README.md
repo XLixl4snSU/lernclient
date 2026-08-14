@@ -5,7 +5,8 @@ Statischer Lernclient für lokale Fragensammlungen und Spaced Repetition. Die An
 ## Funktionen
 
 - Import und Aktualisierung von `.lernbank`-Fragensammlungen
-- Single Choice, Multiple Choice, Matrix, Lückentext, Zuordnung und Sortieraufgaben
+- Single Choice, Multiple Choice, Matrix, Lückentext, Zuordnung, Sortieraufgaben und Drag & Drop auf Bildern
+- eingebettete, offline nutzbare Bilder für alle Fragentypen
 - Spaced Repetition mit konfigurierbaren Lern- und Wiederholungszeiten
 - Live-Suche über Fragen und Lösungen mit Typ-, Punktzahl- und Lernstandfiltern
 - Anzeige und Anpassung einzelner Wiederholungstermine
@@ -57,4 +58,4 @@ Diese Dateitypen sind über `.gitignore` vom Repository ausgeschlossen und sollt
 
 Importierte Dateien werden direkt im Browser verarbeitet und nicht an einen Anwendungsserver übertragen.
 
-Enthält eine Frage eine externe Bild-URL, lädt der Browser das Bild direkt von dieser Quelle. Dabei wird kein Referrer gesendet; die externe Quelle kann technisch weiterhin die IP-Adresse des Nutzers sehen.
+Version-2-Dateien enthalten Bilder einmalig im zentralen Asset-Store. Der Client rendert ausschließlich diese eingebetteten Kopien und ist beim Lernen nicht von externen Bildservern abhängig. Alte Version-1-Dateien bleiben ladbar.

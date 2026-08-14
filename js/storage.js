@@ -120,6 +120,7 @@ export async function importBankPayload(payload) {
   const workspace = {
     id: payload.bank.id,
     bank: payload.bank,
+    assets: payload.assets || {},
     questions: payload.questions,
     cards,
     reviews,
@@ -140,6 +141,7 @@ export async function importBackupPayload(payload) {
   const workspace = {
     id: payload.bank.id,
     bank: payload.bank,
+    assets: payload.assets || {},
     questions: payload.questions,
     cards,
     reviews,

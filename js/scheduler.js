@@ -20,6 +20,10 @@ function validDuration(value, fallback, minimum, maximum) {
   return Number.isFinite(number) && number >= minimum && number <= maximum ? number : fallback;
 }
 
+function forgottenDelay(stepSeconds) {
+  return Math.max(60, Math.floor(stepSeconds / 2));
+}
+
 export function normalizeSchedulerSettings(value = {}) {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   const settings = {
@@ -89,9 +93,9 @@ export async function scheduleReview(questionId, existingCard, rating, answerCor
   if (['new', 'learning'].includes(previousState)) {
     const current = Math.max(0, Math.min(stepIndex, learningStepsSeconds.length - 1));
     if (rating === 'forgot') {
-      nextState = 'learning'; nextStep = 0; delay = learningStepsSeconds[0];
+      nextState = 'learning'; nextStep = 0; delay = forgottenDelay(learningStepsSeconds[0]);
     } else if (rating === 'partial') {
-      nextState = 'learning'; nextStep = current; delay = Math.max(5 * 60, Math.floor(learningStepsSeconds[current] / 2));
+      nextState = 'learning'; nextStep = current; delay = learningStepsSeconds[current];
     } else if (rating === 'effort') {
       if (current + 1 < learningStepsSeconds.length) {
         nextState = 'learning'; nextStep = current + 1; delay = learningStepsSeconds[current + 1];
@@ -105,9 +109,9 @@ export async function scheduleReview(questionId, existingCard, rating, answerCor
     }
   } else if (previousState === 'relearning') {
     if (rating === 'forgot') {
-      nextState = 'relearning'; nextStep = 0; delay = relearningSeconds;
+      nextState = 'relearning'; nextStep = 0; delay = forgottenDelay(relearningSeconds);
     } else if (rating === 'partial') {
-      nextState = 'relearning'; nextStep = 0; delay = Math.max(5 * 60, Math.floor(relearningSeconds / 2));
+      nextState = 'relearning'; nextStep = 0; delay = relearningSeconds;
     } else {
       nextState = 'review'; nextStep = 0;
       if (rating === 'easy') { nextInterval = Math.max(1, intervalDays * EASY_BONUS); ease += 0.15; }

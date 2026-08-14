@@ -1,8 +1,9 @@
 export const BANK_FORMAT = 'lerndatenbank.bank';
 export const BACKUP_FORMAT = 'lerndatenbank.backup';
-export const FORMAT_VERSION = 1;
+export const FORMAT_VERSION = 2;
+export const SUPPORTED_FORMAT_VERSIONS = new Set([1, 2]);
 export const SCHEDULER_VERSION = 1;
-const MAX_FILE_BYTES = 50 * 1024 * 1024;
+const MAX_FILE_BYTES = 250 * 1024 * 1024;
 
 function isObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -24,11 +25,29 @@ function validateBankCore(payload) {
 
 export function validatePayload(payload) {
   if (!isObject(payload)) throw new Error('Die Datei enthält kein JSON-Objekt.');
-  if (payload.formatVersion !== FORMAT_VERSION) {
+  if (!SUPPORTED_FORMAT_VERSIONS.has(payload.formatVersion)) {
     throw new Error(`Nicht unterstützte Formatversion: ${payload.formatVersion ?? 'unbekannt'}.`);
   }
   if (![BANK_FORMAT, BACKUP_FORMAT].includes(payload.format)) throw new Error('Unbekanntes Lerndatenbank-Dateiformat.');
   validateBankCore(payload);
+  if (payload.formatVersion === 2 && !isObject(payload.assets)) {
+    throw new Error('Die Version-2-Datei enthält keinen zentralen Asset-Store.');
+  }
+  if (payload.formatVersion === 2) {
+    for (const [id, asset] of Object.entries(payload.assets)) {
+      if (!isObject(asset) || asset.kind !== 'image' || typeof asset.mimeType !== 'string' || !asset.mimeType.startsWith('image/') || typeof asset.dataBase64 !== 'string') {
+        throw new Error(`Ungültiges eingebettetes Asset: ${id}`);
+      }
+    }
+    for (const question of payload.questions) {
+      for (const reference of question.assets || []) {
+        const role = reference?.role === 'question' ? 'prompt' : reference?.role;
+        if (['prompt', 'interaction-background'].includes(role) && !payload.assets[reference.id]) {
+          throw new Error(`Pflichtbild ${reference.id || 'unbekannt'} für Frage ${question.id} fehlt.`);
+        }
+      }
+    }
+  }
   if (payload.format === BACKUP_FORMAT) {
     if (!isObject(payload.progress)) throw new Error('Das Backup enthält keinen Lernfortschritt.');
     if (payload.progress.schedulerVersion !== SCHEDULER_VERSION) {
@@ -40,7 +59,7 @@ export function validatePayload(payload) {
 
 export async function readLearningFile(file) {
   if (!file) throw new Error('Keine Datei ausgewählt.');
-  if (file.size > MAX_FILE_BYTES) throw new Error('Die Datei ist größer als 50 MB und wird aus Sicherheitsgründen nicht geladen.');
+  if (file.size > MAX_FILE_BYTES) throw new Error('Die Datei ist größer als 250 MB und wird aus Sicherheitsgründen nicht geladen.');
   let payload;
   try {
     payload = JSON.parse(await file.text());
@@ -56,6 +75,7 @@ export function backupFromWorkspace(workspace) {
     formatVersion: FORMAT_VERSION,
     exportedAt: new Date().toISOString(),
     bank: {...workspace.bank, questionCount: workspace.questions.length},
+    assets: workspace.assets || {},
     questions: workspace.questions,
     progress: {
       schedulerVersion: SCHEDULER_VERSION,

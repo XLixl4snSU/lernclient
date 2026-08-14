@@ -10,6 +10,7 @@ import {
 import {
   renderInteraction, collectResponse, evaluateAnswer, renderFeedback,
   displayPromptText, renderCorrectSolution, wireQuestionInteractions, searchableText,
+  setAssetStore, renderAssetsForRoles,
 } from './questions.js';
 
 const app = document.getElementById('app');
@@ -38,7 +39,7 @@ function pointsLabel(points) {
 }
 
 function typeLabel(type) {
-  return ({single_choice:'Single Choice', multiple_choice:'Multiple Choice', choice_matrix:'Matrix', cloze:'Lückentext', matching:'Zuordnung', ordering:'Reihenfolge'})[type] || type;
+  return ({single_choice:'Single Choice', multiple_choice:'Multiple Choice', choice_matrix:'Matrix', cloze:'Lückentext', matching:'Zuordnung', ordering:'Reihenfolge', image_drag_drop:'Drag & Drop auf Bild', drag_drop:'Drag & Drop (Legacy)'})[type] || type;
 }
 
 function stateLabel(state) {
@@ -46,15 +47,27 @@ function stateLabel(state) {
 }
 
 function renderQuestionAssets(question) {
-  const assets = (question?.assets || []).filter(asset => typeof asset?.url === 'string' && /^(https:\/\/|data:image\/)/i.test(asset.url));
-  if (!assets.length) return '';
-  return `<div class="question-assets">${assets.map(asset => `<img class="question-asset" src="${escapeHtml(asset.url)}" alt="${escapeHtml(asset.alt || '')}" loading="lazy" referrerpolicy="no-referrer">`).join('')}</div>`;
+  return renderAssetsForRoles(question, new Set(['prompt']));
 }
 
 function formatDue(value) {
   if (!value) return '–';
   const date = new Date(value);
   return new Intl.DateTimeFormat('de-DE', {dateStyle:'medium', timeStyle:'short'}).format(date);
+}
+
+function formatReviewDelay(dueAt, now = new Date()) {
+  const due = new Date(dueAt);
+  const seconds = Math.max(0, (due - now) / 1000);
+  if (seconds < 3600) return `in ${Math.max(1, Math.round(seconds / 60))} Min.`;
+  if (seconds < 86400) {
+    const hours = Math.round(seconds / 360) / 10;
+    return `in ${new Intl.NumberFormat('de-DE', {maximumFractionDigits:1}).format(hours)} Std.`;
+  }
+  const days = seconds / 86400;
+  const roundedDays = days < 14 ? Math.round(days * 10) / 10 : Math.round(days);
+  const value = new Intl.NumberFormat('de-DE', {maximumFractionDigits:1}).format(roundedDays);
+  return `in ${value} ${roundedDays === 1 ? 'Tag' : 'Tagen'}`;
 }
 
 function datetimeLocalValue(value) {
@@ -143,6 +156,7 @@ function learningQuestion(requestedId = null) {
       learningQuestion(question.id);
     });
   } else {
+    updateRatingPreviews(question, result);
     document.querySelectorAll('[data-rating]').forEach(button => button.addEventListener('click', async () => {
       button.disabled = true;
       const rating = button.dataset.rating;
@@ -159,12 +173,33 @@ function learningQuestion(requestedId = null) {
   }
 }
 
+async function updateRatingPreviews(question, result) {
+  const now = new Date();
+  await Promise.all([...document.querySelectorAll('[data-rating]')].map(async button => {
+    const output = button.querySelector('[data-rating-due]');
+    if (!output) return;
+    try {
+      const scheduled = await scheduleReview(
+        question.id, workspace.cards?.[question.id], button.dataset.rating, result.correct,
+        now, workspace.settings?.scheduler,
+      );
+      const relativeDue = formatReviewDelay(scheduled.card.dueAt, now);
+      const exactDue = formatDue(scheduled.card.dueAt);
+      output.textContent = relativeDue;
+      output.title = `Wiederholung am ${exactDue}`;
+      button.setAttribute('aria-label', `${button.querySelector('strong')?.textContent || ''}, Wiederholung ${relativeDue}, am ${exactDue}`);
+    } catch {
+      output.textContent = 'Termin nicht verfügbar';
+    }
+  }));
+}
+
 function renderRatings(question, result) {
   return `<div class="rating-panel"><div><strong>Wie gut konntest du dich erinnern?</strong><div class="note">Die fachliche Auswertung (${result.earned}/${result.total || 1}) wird getrennt von deiner Erinnerungsbewertung gespeichert.</div></div><div class="rating-grid">
-    <button type="button" class="rating forgot" data-rating="forgot"><strong>Vergessen</strong><span>zurück in die Lernphase</span></button>
-    <button type="button" class="rating partial" data-rating="partial"><strong>Teilweise</strong><span>kurzes Intervall</span></button>
-    <button type="button" class="rating effort" data-rating="effort"><strong>Mit Anstrengung</strong><span>normales Intervall</span></button>
-    <button type="button" class="rating easy" data-rating="easy"><strong>Leicht</strong><span>größeres Intervall</span></button>
+    <button type="button" class="rating forgot" data-rating="forgot"><strong>Vergessen</strong><span class="rating-due" data-rating-due>Termin wird berechnet …</span><span>zurück in die Lernphase</span></button>
+    <button type="button" class="rating partial" data-rating="partial"><strong>Teilweise</strong><span class="rating-due" data-rating-due>Termin wird berechnet …</span><span>kurzes Intervall</span></button>
+    <button type="button" class="rating effort" data-rating="effort"><strong>Mit Anstrengung</strong><span class="rating-due" data-rating-due>Termin wird berechnet …</span><span>normales Intervall</span></button>
+    <button type="button" class="rating easy" data-rating="easy"><strong>Leicht</strong><span class="rating-due" data-rating-due>Termin wird berechnet …</span><span>größeres Intervall</span></button>
   </div></div>`;
 }
 
@@ -325,11 +360,11 @@ function settingsPage() {
   <section class="card backup-reminder backup-warning"><div><h2>Wichtig: Dein Lernfortschritt ist nicht automatisch gesichert</h2><p>Der Lernclient speichert ausschließlich in der lokalen Browser-Datenbank. Es gibt kein Nutzerkonto, keine Cloud-Synchronisierung und keine automatische Backup-Datei.</p><ul class="backup-risks"><li>Gelöschte Browserdaten können den gesamten Lernstand entfernen.</li><li>Auf einem anderen Gerät oder in einem anderen Browser ist der Lernstand nicht automatisch vorhanden.</li><li><strong>Lade deshalb nach jeder Lernsitzung selbst ein aktuelles <code>.lernbackup</code> herunter.</strong></li></ul></div><button class="button" data-download-backup>Backup jetzt herunterladen</button></section>
   <section class="grid two-column"><div class="card"><h2>Aktive Sammlung</h2><p><strong>${escapeHtml(workspace.bank.name)}</strong><br><span class="note">${workspace.questions.length} Fragen · ID ${escapeHtml(workspace.bank.id)}</span></p><div class="actions"><div class="action-row"><div class="action-copy"><h3>Fragensammlung aktualisieren</h3><p>Neue <code>.lernbank</code> derselben Bank-ID einlesen; bestehender Fortschritt bleibt für unveränderte Fragen erhalten.</p></div><button class="button secondary" data-open-bank>Öffnen</button></div><div class="action-row"><div class="action-copy"><h3>Persönliches Backup</h3><p>Fragen, Lernstand, Lernhistorie und Wiederholungszeiten in einer Datei sichern.</p></div><button class="button" data-download-backup>Herunterladen</button></div><div class="action-row"><div class="action-copy"><h3>Backup wiederherstellen</h3><p>Ein persönliches <code>.lernbackup</code> übernehmen und mit dem darin gespeicherten Lernstand weiterlernen.</p></div><button class="button secondary" data-open-backup>Öffnen</button></div></div></div><div class="card"><h2>Lokale Sammlungen</h2><div id="workspace-list"><span class="note">Wird geladen …</span></div></div></section>
   <section class="card scheduler-settings-card"><h2>Wiederholungszeiten</h2><p class="note">Diese Zeiten gelten für zukünftige Bewertungen. Bereits geplante Wiederholungen werden nicht rückwirkend verschoben.</p><form id="scheduler-settings" class="scheduler-settings-form"><div class="scheduler-settings-grid">
-    <div class="filter-field"><label for="first-learning-minutes">Erste Lernstufe</label><input id="first-learning-minutes" name="firstLearningMinutes" type="number" min="1" max="1440" step="1" required value="${scheduler.firstLearningMinutes}"><span class="note">Minuten · nach „Vergessen“</span></div>
+    <div class="filter-field"><label for="first-learning-minutes">Erste Lernstufe</label><input id="first-learning-minutes" name="firstLearningMinutes" type="number" min="1" max="1440" step="1" required value="${scheduler.firstLearningMinutes}"><span class="note">Minuten · „Vergessen“ nach halber Zeit, mindestens 1 Minute</span></div>
     <div class="filter-field"><label for="second-learning-hours">Zweite Lernstufe</label><input id="second-learning-hours" name="secondLearningHours" type="number" min="1" max="168" step="1" required value="${scheduler.secondLearningHours}"><span class="note">Stunden</span></div>
     <div class="filter-field"><label for="third-learning-days">Dritte Lernstufe</label><input id="third-learning-days" name="thirdLearningDays" type="number" min="1" max="365" step="1" required value="${scheduler.thirdLearningDays}"><span class="note">Tage</span></div>
     <div class="filter-field"><label for="easy-interval-days">Direkt „Leicht“</label><input id="easy-interval-days" name="easyIntervalDays" type="number" min="1" max="365" step="1" required value="${scheduler.easyIntervalDays}"><span class="note">Tage bis zur Wiederholung</span></div>
-    <div class="filter-field"><label for="relearning-minutes">Wiederlernen</label><input id="relearning-minutes" name="relearningMinutes" type="number" min="1" max="1440" step="1" required value="${scheduler.relearningMinutes}"><span class="note">Minuten nach einer vergessenen Wiederholung</span></div>
+    <div class="filter-field"><label for="relearning-minutes">Wiederlernen</label><input id="relearning-minutes" name="relearningMinutes" type="number" min="1" max="1440" step="1" required value="${scheduler.relearningMinutes}"><span class="note">Minuten · „Vergessen“ nach halber Zeit, mindestens 1 Minute</span></div>
   </div><div class="button-row scheduler-settings-actions"><button class="button" type="submit">Zeiten speichern</button><button class="button secondary" type="button" data-reset-scheduler>Standardwerte</button></div></form></section>
   <section class="card danger-zone"><div><h2>Gesamten Lernfortschritt zurücksetzen</h2><p class="note">Löscht alle Termine, Scheduler-Zustände und Bewertungen dieser Sammlung. Fragen, Wiederholungszeit-Einstellungen und heruntergeladene Backups bleiben erhalten.</p></div><button class="button danger" type="button" data-reset-all-progress>Gesamten Lernfortschritt löschen</button></section>`);
   wireFileButtons();
@@ -415,6 +450,7 @@ function notFound() { shell('<div class="card empty"><div class="empty-mark">404
 
 async function route() {
   workspace = workspace || await getActiveWorkspace();
+  setAssetStore(workspace?.assets || {});
   const hash = location.hash || '#/';
   const path = hash.slice(1).split('?')[0] || '/';
   if (path !== '/learn/session' && !path.startsWith('/learn/')) learningSessionSeed = null;

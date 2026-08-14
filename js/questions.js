@@ -4,6 +4,35 @@ function escapeHtml(value) {
     .replaceAll('"', '&quot;').replaceAll("'", '&#039;');
 }
 
+let assetStore = {};
+
+export function setAssetStore(assets) {
+  assetStore = assets && typeof assets === 'object' && !Array.isArray(assets) ? assets : {};
+}
+
+export function resolveAsset(assetOrId) {
+  const reference = typeof assetOrId === 'string' ? {id: assetOrId} : (assetOrId || {});
+  const id = reference.id || (reference.sha256 ? `asset_${reference.sha256}` : '');
+  const embedded = assetStore[id];
+  if (embedded?.kind === 'image' && typeof embedded.mimeType === 'string' && embedded.mimeType.startsWith('image/') && typeof embedded.dataBase64 === 'string') {
+    return `data:${embedded.mimeType};base64,${embedded.dataBase64}`;
+  }
+  const legacy = reference.url || '';
+  return /^(data:image\/|https:\/\/)/i.test(legacy) ? legacy : '';
+}
+
+export function renderAssetsForRoles(question, roles) {
+  const images = (question?.assets || []).filter(asset => {
+    const role = asset?.role === 'question' ? 'prompt' : (asset?.role || 'prompt');
+    return !roles || roles.has(role);
+  }).map(asset => {
+    const source = resolveAsset(asset);
+    if (!source) return `<div class="asset-warning">⚠ Dieses Bild ist in der Lernbank nicht verfügbar.</div>`;
+    return `<img class="question-asset" src="${escapeHtml(source)}" alt="${escapeHtml(asset.alt || '')}" loading="lazy">`;
+  });
+  return images.length ? `<div class="question-assets">${images.join('')}</div>` : '';
+}
+
 const PROMPT_BLOCK_ELEMENTS = new Set([
   'ADDRESS', 'ARTICLE', 'ASIDE', 'BLOCKQUOTE', 'DIV', 'DL', 'FIELDSET',
   'FIGCAPTION', 'FIGURE', 'FOOTER', 'FORM', 'H1', 'H2', 'H3', 'H4', 'H5',
@@ -151,6 +180,22 @@ export function evaluateAnswer(question, response) {
       earned: correctCount, total: items.length,
     };
   }
+  if (question.type === 'image_drag_drop') {
+    let supplied = {};
+    try { supplied = JSON.parse(responseOne(response, 'image_placements') || '{}'); } catch { supplied = {}; }
+    const items = new Map((answer.items || []).map(item => [String(item.id), String(item.text || '')]));
+    const expected = new Map((answer.placements || []).map(item => [String(item.targetId), String(item.itemId)]));
+    let correctCount = 0;
+    (answer.targets || []).forEach(target => {
+      const targetId = String(target.id);
+      const actual = String(supplied[targetId] || '');
+      const wanted = expected.get(targetId) || '';
+      const ok = actual === wanted;
+      correctCount += Number(ok);
+      details.push({targetId, correct: ok, supplied: items.get(actual) || '', expected: items.get(wanted) || ''});
+    });
+    return {correct: correctCount === (answer.targets || []).length, details, earned: correctCount, total: (answer.targets || []).length};
+  }
   return {correct: null, details: [], earned: 0, total: 0};
 }
 
@@ -270,12 +315,34 @@ function renderOrdering(question, response, result) {
   }).join('')}</div><input type="hidden" name="order" value="${order.join(',')}"></div>`;
 }
 
+function renderImageDragDrop(question, response, result) {
+  const answer = question.answer || {};
+  const imageAsset = (question.assets || []).find(asset => asset.id === answer.imageAssetId);
+  const source = resolveAsset(imageAsset);
+  let placements = {};
+  try { placements = JSON.parse(responseOne(response, 'image_placements') || '{}'); } catch { placements = {}; }
+  const items = new Map((answer.items || []).map(item => [String(item.id), String(item.text || '')]));
+  const assigned = new Set(Object.values(placements).map(String));
+  const targets = (answer.targets || []).map((target, index) => {
+    const targetId = String(target.id);
+    const itemId = String(placements[targetId] || '');
+    const detail = result?.details?.find(item => item.targetId === targetId);
+    const cls = detail ? (detail.correct ? 'is-correct' : 'is-wrong') : '';
+    const expected = result && detail && !detail.correct ? `<span class="image-drop-expected">richtig: ${escapeHtml(detail.expected || 'leer')}</span>` : '';
+    return `<button type="button" class="image-drop-target ${itemId ? 'has-value' : ''} ${cls}" data-image-target-id="${escapeHtml(targetId)}" data-image-item-id="${escapeHtml(itemId)}" style="left:${Number(target.x) * 100}%;top:${Number(target.y) * 100}%;width:${Number(target.width) * 100}%;height:${Number(target.height) * 100}%" ${result ? 'disabled' : ''}><span class="image-drop-value">${itemId ? escapeHtml(items.get(itemId) || itemId) : `<span class="image-drop-empty">${index + 1}</span>`}</span>${expected}</button>`;
+  }).join('');
+  const pool = result ? '' : `<div class="image-item-pool" data-image-item-pool>${(answer.items || []).filter(item => !assigned.has(String(item.id))).map(item => `<button type="button" class="image-drag-item" draggable="true" data-image-item-id="${escapeHtml(item.id)}">${escapeHtml(item.text)}</button>`).join('')}</div>`;
+  const image = source ? `<div class="image-drop-stage"><img src="${escapeHtml(source)}" alt="Interaktionsbild">${targets}</div>` : '<div class="asset-warning">⚠ Das benötigte Interaktionsbild fehlt.</div>';
+  return `<div class="image-drag-drop" data-checked="${result ? '1' : '0'}">${image}${result ? '' : '<p class="interaction-hint">Begriff ziehen oder antippen, danach ein Ziel antippen. Ein belegtes Ziel kann erneut gewählt oder geleert werden.</p>'}<h3>Verfügbare Begriffe</h3>${pool}<input type="hidden" name="image_placements" value="${escapeHtml(JSON.stringify(placements))}"></div>`;
+}
+
 export function renderInteraction(question, response = {}, result = null) {
   if (['single_choice', 'multiple_choice'].includes(question.type)) return renderChoice(question, response, result);
   if (question.type === 'choice_matrix') return renderMatrix(question, response, result);
   if (question.type === 'cloze') return renderCloze(question, response, result);
   if (question.type === 'matching') return renderMatching(question, response, result);
   if (question.type === 'ordering') return renderOrdering(question, response, result);
+  if (question.type === 'image_drag_drop') return renderImageDragDrop(question, response, result);
   return '<div class="flash error">Dieser Fragentyp kann im Lernclient noch nicht automatisch dargestellt werden.</div>';
 }
 
@@ -306,12 +373,15 @@ export function correctResponse(question) {
   if (question.type === 'ordering') {
     return {order: [(answer.items || []).map((_, index) => index).join(',')]};
   }
+  if (question.type === 'image_drag_drop') {
+    return {image_placements: [JSON.stringify(Object.fromEntries((answer.placements || []).map(item => [String(item.targetId), String(item.itemId)])))]};
+  }
   return {};
 }
 
 export function renderCorrectSolution(question) {
   const response = correctResponse(question);
-  return renderInteraction(question, response, evaluateAnswer(question, response));
+  return renderInteraction(question, response, evaluateAnswer(question, response)) + renderAssetsForRoles(question, new Set(['answer']));
 }
 
 export function collectResponse(container, question) {
@@ -345,6 +415,8 @@ export function collectResponse(container, question) {
     }
   } else if (question.type === 'ordering') {
     response.order = [container.querySelector('[name="order"]')?.value || ''];
+  } else if (question.type === 'image_drag_drop') {
+    response.image_placements = [container.querySelector('[name="image_placements"]')?.value || '{}'];
   }
   return response;
 }
@@ -355,7 +427,7 @@ export function renderFeedback(question, result) {
   const title = result.correct ? 'Ihre Antwort ist richtig.' : result.earned > 0 ? 'Ihre Antwort ist nur teilweise richtig.' : 'Ihre Antwort ist falsch.';
   const score = result.total > 1 ? `<span>${result.earned} von ${result.total} Teilantworten richtig</span>` : '';
   const feedback = question.feedback?.text || '';
-  return `<div class="answer-feedback ${state}"><div class="answer-feedback-head"><strong>${title}</strong>${score}</div>${feedback ? `<div class="feedback-text">${escapeHtml(feedback)}</div>` : ''}</div>`;
+  return `<div class="answer-feedback ${state}"><div class="answer-feedback-head"><strong>${title}</strong>${score}</div>${feedback ? `<div class="feedback-text">${escapeHtml(feedback)}</div>` : ''}${renderAssetsForRoles(question, new Set(['feedback']))}</div>`;
 }
 
 export function solutionLines(question) {
@@ -377,6 +449,10 @@ export function solutionLines(question) {
   }
   if (question.type === 'matching') return (answer.pairs || []).map(pair => `${pair.left} → ${pair.right}`);
   if (question.type === 'ordering') return (answer.items || []).map((item, index) => `${index + 1}. ${item}`);
+  if (question.type === 'image_drag_drop') {
+    const items = new Map((answer.items || []).map(item => [String(item.id), String(item.text || '')]));
+    return (answer.placements || []).map(item => `${items.get(String(item.itemId)) || '?'} → ${item.targetId}`);
+  }
   return [];
 }
 
@@ -453,6 +529,51 @@ export function wireQuestionInteractions(container) {
         if (input?.value) { if (pool) pool.appendChild(tokenFor(input.value)); input.value = ''; target.innerHTML = '<span class="match-empty">?</span>'; target.classList.remove('has-value'); }
       });
     });
+  });
+
+  container.querySelectorAll('.image-drag-drop[data-checked="0"]').forEach(interaction => {
+    const pool = interaction.querySelector('[data-image-item-pool]');
+    const hidden = interaction.querySelector('[name="image_placements"]');
+    let selected = null;
+    const placements = () => Object.fromEntries([...interaction.querySelectorAll('[data-image-target-id]')]
+      .filter(target => target.dataset.imageItemId)
+      .map(target => [target.dataset.imageTargetId, target.dataset.imageItemId]));
+    const sync = () => { if (hidden) hidden.value = JSON.stringify(placements()); };
+    const setSelected = token => {
+      selected?.classList.remove('selected-token'); selected = selected === token ? null : token;
+      selected?.classList.add('selected-token');
+    };
+    const makeToken = (id, label) => {
+      const token = document.createElement('button'); token.type = 'button'; token.className = 'image-drag-item'; token.draggable = true; token.dataset.imageItemId = id; token.textContent = label;
+      wireToken(token); return token;
+    };
+    const clearTarget = target => {
+      const oldId = target.dataset.imageItemId; const oldLabel = target.querySelector('.image-drop-value')?.textContent || oldId;
+      if (oldId && pool) pool.append(makeToken(oldId, oldLabel));
+      target.dataset.imageItemId = ''; target.classList.remove('has-value');
+      const value = target.querySelector('.image-drop-value'); if (value) value.innerHTML = '<span class="image-drop-empty">?</span>';
+      sync();
+    };
+    const assign = (target, token) => {
+      if (!target || !token) return;
+      const id = token.dataset.imageItemId || ''; const label = token.textContent || id;
+      interaction.querySelectorAll('[data-image-target-id]').forEach(other => { if (other !== target && other.dataset.imageItemId === id) clearTarget(other); });
+      if (target.dataset.imageItemId && target.dataset.imageItemId !== id) clearTarget(target);
+      target.dataset.imageItemId = id; target.classList.add('has-value');
+      const value = target.querySelector('.image-drop-value'); if (value) value.textContent = label;
+      token.remove(); selected = null; sync();
+    };
+    function wireToken(token) {
+      token.addEventListener('click', () => setSelected(token));
+      token.addEventListener('dragstart', event => { event.dataTransfer.setData('text/plain', token.dataset.imageItemId || ''); setSelected(token); });
+    }
+    pool?.querySelectorAll('.image-drag-item').forEach(wireToken);
+    interaction.querySelectorAll('[data-image-target-id]').forEach(target => {
+      target.addEventListener('dragover', event => event.preventDefault());
+      target.addEventListener('drop', event => { event.preventDefault(); const id = event.dataTransfer.getData('text/plain'); const token = [...(pool?.querySelectorAll('.image-drag-item') || [])].find(item => item.dataset.imageItemId === id) || selected; assign(target, token); });
+      target.addEventListener('click', () => selected ? assign(target, selected) : clearTarget(target));
+    });
+    sync();
   });
 
   container.querySelectorAll('.learning-line-match').forEach(matcher => {
