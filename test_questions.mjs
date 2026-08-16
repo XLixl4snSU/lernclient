@@ -41,6 +41,8 @@ test('embedded assets are resolved centrally', () => {
   assert.equal(resolveAsset({id: 'asset_hash', sourceUrl: 'https://remote.invalid/image.png'}), 'data:image/png;base64,aGVsbG8=');
   setAssetStore({});
   assert.equal(resolveAsset({id: 'asset_hash', sourceUrl: 'https://remote.invalid/image.png'}), '');
+  assert.equal(resolveAsset({id: 'asset_hash', url: '/bank-assets/abc123'}), '/bank-assets/abc123');
+  assert.equal(resolveAsset({id: 'asset_hash', url: '/untrusted/local-file.png'}), '');
 });
 
 test('format versions 1 and 2 remain loadable', () => {

@@ -18,7 +18,7 @@ export function resolveAsset(assetOrId) {
     return `data:${embedded.mimeType};base64,${embedded.dataBase64}`;
   }
   const legacy = reference.url || '';
-  return /^(data:image\/|https:\/\/)/i.test(legacy) ? legacy : '';
+  return /^(data:image\/|https:\/\/)/i.test(legacy) || legacy.startsWith('/bank-assets/') ? legacy : '';
 }
 
 export function renderAssetsForRoles(question, roles) {
@@ -510,6 +510,66 @@ export function searchableText(question) {
   return normalizeText(values.join(' '));
 }
 
+const IMAGE_DROP_LABEL_MIN_FONT_SIZE = 9;
+
+function fitImageDropLabel(target) {
+  const value = target.querySelector('.image-drop-value');
+  const label = value?.textContent?.trim() || '';
+  if (!value || !label || value.querySelector('.image-drop-empty')) {
+    value?.style.removeProperty('font-size');
+    target.removeAttribute('title');
+    return;
+  }
+
+  target.title = label;
+  const targetStyle = getComputedStyle(target);
+  const availableWidth = target.clientWidth
+    - (Number.parseFloat(targetStyle.paddingLeft) || 0)
+    - (Number.parseFloat(targetStyle.paddingRight) || 0);
+  const availableHeight = target.clientHeight
+    - (Number.parseFloat(targetStyle.paddingTop) || 0)
+    - (Number.parseFloat(targetStyle.paddingBottom) || 0);
+  const maximum = Number.parseFloat(targetStyle.fontSize) || 16;
+  const minimum = Math.min(IMAGE_DROP_LABEL_MIN_FONT_SIZE, maximum);
+  if (!(availableWidth > 0) || !(availableHeight > 0)) return;
+
+  const fits = size => {
+    value.style.fontSize = `${size}px`;
+    return value.scrollWidth <= availableWidth + 0.5
+      && value.scrollHeight <= availableHeight + 0.5;
+  };
+  if (fits(maximum)) return;
+
+  let lower = minimum;
+  let upper = maximum;
+  let best = minimum;
+  for (let index = 0; index < 8; index += 1) {
+    const candidate = (lower + upper) / 2;
+    if (fits(candidate)) {
+      best = candidate;
+      lower = candidate;
+    } else {
+      upper = candidate;
+    }
+  }
+  value.style.fontSize = `${Math.floor(best * 10) / 10}px`;
+}
+
+function wireImageDropLabelFitting(container) {
+  const stages = container.querySelectorAll('.image-drop-stage');
+  stages.forEach(stage => {
+    const fitAll = () => stage.querySelectorAll('.image-drop-target').forEach(fitImageDropLabel);
+    requestAnimationFrame(fitAll);
+    const image = stage.querySelector('img');
+    if (image && !image.complete) image.addEventListener('load', fitAll, {once: true});
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(fitAll);
+      observer.observe(stage);
+    }
+    document.fonts?.ready.then(fitAll);
+  });
+}
+
 export function wireQuestionInteractions(container) {
   container.querySelectorAll('.image-drop-target').forEach(target => {
     const geometry = {
@@ -522,6 +582,7 @@ export function wireQuestionInteractions(container) {
       if (Number.isFinite(value)) target.style[property] = `${value * 100}%`;
     });
   });
+  wireImageDropLabelFitting(container);
 
   container.querySelectorAll('.sortable-list[data-checked="0"]').forEach(list => {
     const hidden = list.parentElement?.querySelector('input[name="order"]');
@@ -606,6 +667,7 @@ export function wireQuestionInteractions(container) {
       if (oldId && pool) pool.append(makeToken(oldId, oldLabel));
       target.dataset.imageItemId = ''; target.classList.remove('has-value');
       const value = target.querySelector('.image-drop-value'); if (value) value.innerHTML = '<span class="image-drop-empty">?</span>';
+      fitImageDropLabel(target);
       sync();
     };
     const assign = (target, token) => {
@@ -615,6 +677,7 @@ export function wireQuestionInteractions(container) {
       if (target.dataset.imageItemId && target.dataset.imageItemId !== id) clearTarget(target);
       target.dataset.imageItemId = id; target.classList.add('has-value');
       const value = target.querySelector('.image-drop-value'); if (value) value.textContent = label;
+      fitImageDropLabel(target);
       token.remove(); selected = null; sync();
     };
     function wireToken(token) {
