@@ -1,3 +1,5 @@
+import {SCHEDULER_VERSION, migrateWorkspaceScheduler} from './scheduler.js';
+
 const DB_NAME = 'lerndatenbank-client';
 const DB_VERSION = 1;
 const WORKSPACES = 'workspaces';
@@ -35,12 +37,17 @@ export async function openDatabase() {
 export async function getWorkspace(bankId) {
   if (!bankId) return null;
   const db = await openDatabase();
+  let stored;
   try {
     const tx = db.transaction(WORKSPACES, 'readonly');
-    return await requestPromise(tx.objectStore(WORKSPACES).get(bankId)) || null;
+    stored = await requestPromise(tx.objectStore(WORKSPACES).get(bankId)) || null;
   } finally {
     db.close();
   }
+  if (!stored) return null;
+  const migration = migrateWorkspaceScheduler(stored);
+  if (migration.migrated) await saveWorkspace(migration.workspace);
+  return migration.workspace;
 }
 
 export async function saveWorkspace(workspace) {
@@ -117,8 +124,9 @@ export async function importBankPayload(payload) {
     }
   }
   const reviews = (existing?.reviews || []).filter(review => validIds.has(review.questionId));
-  const workspace = {
+  const candidate = {
     id: payload.bank.id,
+    schedulerVersion: SCHEDULER_VERSION,
     bank: payload.bank,
     assets: payload.assets || {},
     questions: payload.questions,
@@ -127,6 +135,7 @@ export async function importBankPayload(payload) {
     settings: existing?.settings || {},
     importedAt: new Date().toISOString(),
   };
+  const {workspace} = migrateWorkspaceScheduler(candidate);
   await saveWorkspace(workspace);
   await setActiveBankId(workspace.id);
   return {workspace, preservedCards: Object.keys(cards).length, preservedReviews: reviews.length, updated: Boolean(existing)};
@@ -138,8 +147,9 @@ export async function importBackupPayload(payload) {
     Object.entries(payload.progress?.cards || {}).filter(([questionId]) => validIds.has(questionId))
   );
   const reviews = (payload.progress?.reviews || []).filter(review => validIds.has(review.questionId));
-  const workspace = {
+  const legacyWorkspace = {
     id: payload.bank.id,
+    schedulerVersion: payload.progress.schedulerVersion,
     bank: payload.bank,
     assets: payload.assets || {},
     questions: payload.questions,
@@ -148,6 +158,7 @@ export async function importBackupPayload(payload) {
     settings: payload.settings || {},
     importedAt: new Date().toISOString(),
   };
+  const {workspace} = migrateWorkspaceScheduler(legacyWorkspace);
   await saveWorkspace(workspace);
   await setActiveBankId(workspace.id);
   return workspace;

@@ -1,6 +1,10 @@
 {
   "type": "module",
   "scripts": {
-    "test": "node --test test_questions.mjs"
+    "vendor:fsrs": "node scripts/vendor-fsrs.mjs",
+    "test": "node --test test_*.mjs"
+  },
+  "dependencies": {
+    "ts-fsrs": "5.4.1"
   }
 }

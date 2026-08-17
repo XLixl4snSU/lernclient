@@ -1,2 +1,3 @@
 *.lernbank
 *.lernbackup
+node_modules/

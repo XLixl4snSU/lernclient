@@ -4,8 +4,8 @@ import {
 } from './storage.js';
 import {BANK_FORMAT, BACKUP_FORMAT, readLearningFile, downloadBackup} from './formats.js';
 import {
-  DEFAULT_SCHEDULER_SETTINGS, learningStats, nextQuestion,
-  normalizeSchedulerSettings, scheduleReview,
+  DEFAULT_SCHEDULER_SETTINGS, SCHEDULER_NAME, isValidStepList, learningStats,
+  nextQuestion, normalizeSchedulerSettings, scheduleReview,
 } from './scheduler.js';
 import {
   renderInteraction, collectResponse, evaluateAnswer, renderFeedback,
@@ -362,16 +362,17 @@ function questionDetail(id) {
 function settingsPage() {
   if (!workspace) return noBankScreen();
   const scheduler = normalizeSchedulerSettings(workspace.settings?.scheduler);
-  shell(`<section class="hero"><div><div class="eyebrow">Konfiguration und lokale Daten</div><h1>Einstellungen & Backup</h1><p class="lead">Passe Wiederholungszeiten an und verwalte die lokal gespeicherten Fragensammlungen und Lernstände.</p></div></section>
+  shell(`<section class="hero"><div><div class="eyebrow">Konfiguration und lokale Daten</div><h1>Einstellungen & Backup</h1><p class="lead">Passe FSRS, kurze Lernschritte und die lokal gespeicherten Fragensammlungen und Lernstände an.</p></div></section>
   <section class="card backup-reminder backup-warning"><div><h2>Wichtig: Dein Lernfortschritt ist nicht automatisch gesichert</h2><p>Der Lernclient speichert ausschließlich in der lokalen Browser-Datenbank. Es gibt kein Nutzerkonto, keine Cloud-Synchronisierung und keine automatische Backup-Datei.</p><ul class="backup-risks"><li>Gelöschte Browserdaten können den gesamten Lernstand entfernen.</li><li>Auf einem anderen Gerät oder in einem anderen Browser ist der Lernstand nicht automatisch vorhanden.</li><li><strong>Lade deshalb nach jeder Lernsitzung selbst ein aktuelles <code>.lernbackup</code> herunter.</strong></li></ul></div><button class="button" data-download-backup>Backup jetzt herunterladen</button></section>
   <section class="grid two-column"><div class="card"><h2>Aktive Sammlung</h2><p><strong>${escapeHtml(workspace.bank.name)}</strong><br><span class="note">${workspace.questions.length} Fragen · ID ${escapeHtml(workspace.bank.id)}</span></p><div class="actions"><div class="action-row"><div class="action-copy"><h3>Fragensammlung aktualisieren</h3><p>Neue <code>.lernbank</code> derselben Bank-ID einlesen; bestehender Fortschritt bleibt für unveränderte Fragen erhalten.</p></div><button class="button secondary" data-open-bank>Öffnen</button></div><div class="action-row"><div class="action-copy"><h3>Persönliches Backup</h3><p>Fragen, Lernstand, Lernhistorie und Wiederholungszeiten in einer Datei sichern.</p></div><button class="button" data-download-backup>Herunterladen</button></div><div class="action-row"><div class="action-copy"><h3>Backup wiederherstellen</h3><p>Ein persönliches <code>.lernbackup</code> übernehmen und mit dem darin gespeicherten Lernstand weiterlernen.</p></div><button class="button secondary" data-open-backup>Öffnen</button></div></div></div><div class="card"><h2>Lokale Sammlungen</h2><div id="workspace-list"><span class="note">Wird geladen …</span></div></div></section>
-  <section class="card scheduler-settings-card"><h2>Wiederholungszeiten</h2><p class="note">Diese Zeiten gelten für zukünftige Bewertungen. Bereits geplante Wiederholungen werden nicht rückwirkend verschoben.</p><form id="scheduler-settings" class="scheduler-settings-form"><div class="scheduler-settings-grid">
-    <div class="filter-field"><label for="first-learning-minutes">Erste Lernstufe</label><input id="first-learning-minutes" name="firstLearningMinutes" type="number" min="1" max="1440" step="1" required value="${scheduler.firstLearningMinutes}"><span class="note">Minuten · „Vergessen“ nach halber Zeit, mindestens 1 Minute</span></div>
-    <div class="filter-field"><label for="second-learning-hours">Zweite Lernstufe</label><input id="second-learning-hours" name="secondLearningHours" type="number" min="1" max="168" step="1" required value="${scheduler.secondLearningHours}"><span class="note">Stunden</span></div>
-    <div class="filter-field"><label for="third-learning-days">Dritte Lernstufe</label><input id="third-learning-days" name="thirdLearningDays" type="number" min="1" max="365" step="1" required value="${scheduler.thirdLearningDays}"><span class="note">Tage</span></div>
-    <div class="filter-field"><label for="easy-interval-days">Direkt „Leicht“</label><input id="easy-interval-days" name="easyIntervalDays" type="number" min="1" max="365" step="1" required value="${scheduler.easyIntervalDays}"><span class="note">Tage bis zur Wiederholung</span></div>
-    <div class="filter-field"><label for="relearning-minutes">Wiederlernen</label><input id="relearning-minutes" name="relearningMinutes" type="number" min="1" max="1440" step="1" required value="${scheduler.relearningMinutes}"><span class="note">Minuten · „Vergessen“ nach halber Zeit, mindestens 1 Minute</span></div>
-  </div><div class="button-row scheduler-settings-actions"><button class="button" type="submit">Zeiten speichern</button><button class="button secondary" type="button" data-reset-scheduler>Standardwerte</button></div></form></section>
+  <section class="card scheduler-settings-card"><h2>FSRS-Wiederholungsplanung</h2><p>FSRS berechnet für jede Karte Schwierigkeit, Gedächtnisstabilität und den nächsten sinnvollen Wiederholungstermin. Verwendet wird ${escapeHtml(SCHEDULER_NAME)}.</p><p class="note">Diese Einstellungen gelten für zukünftige Bewertungen. Bereits geplante Wiederholungen werden nicht rückwirkend verschoben.</p><form id="scheduler-settings" class="scheduler-settings-form"><div class="scheduler-settings-grid">
+    <div class="filter-field"><label for="request-retention-percent">Gewünschte Erinnerungsquote</label><input id="request-retention-percent" name="requestRetentionPercent" type="number" min="70" max="97" step="1" required value="${scheduler.requestRetentionPercent}"><span class="note">Prozent · höher bedeutet mehr Wiederholungen</span></div>
+    <div class="filter-field"><label for="learning-steps">Lernschritte für neue Karten</label><input id="learning-steps" name="learningSteps" type="text" required value="${escapeHtml(scheduler.learningSteps)}" placeholder="1m, 10m"><span class="note"><code>m</code> Minuten, <code>h</code> Stunden, <code>d</code> Tage · z. B. <code>1m, 10m</code></span></div>
+    <div class="filter-field"><label for="relearning-steps">Wiederlernschritte nach Vergessen</label><input id="relearning-steps" name="relearningSteps" type="text" required value="${escapeHtml(scheduler.relearningSteps)}" placeholder="10m"><span class="note">Kurze Schritte, bevor FSRS wieder dynamisch plant</span></div>
+    <div class="filter-field"><label for="maximum-interval-days">Maximales Intervall</label><input id="maximum-interval-days" name="maximumIntervalDays" type="number" min="30" max="36500" step="1" required value="${scheduler.maximumIntervalDays}"><span class="note">Tage · Obergrenze für sehr stabile Karten</span></div>
+    <div class="filter-field"><label for="learn-ahead-minutes">Am Sitzungsende vorziehen</label><input id="learn-ahead-minutes" name="learnAheadMinutes" type="number" min="0" max="120" step="1" required value="${scheduler.learnAheadMinutes}"><span class="note">Minuten · Lernkarten in diesem Fenster dürfen vorzeitig erscheinen</span></div>
+    <label class="filter-field checkbox-field" for="enable-fuzz"><span>Zeitliche Streuung</span><span><input id="enable-fuzz" name="enableFuzz" type="checkbox" ${scheduler.enableFuzz ? 'checked' : ''}> Lange Intervalle leicht streuen</span><span class="note">Verhindert, dass viele Karten dauerhaft am selben Tag zusammenfallen.</span></label>
+  </div><div class="button-row scheduler-settings-actions"><button class="button" type="submit">FSRS-Einstellungen speichern</button><button class="button secondary" type="button" data-reset-scheduler>Standardwerte</button></div></form></section>
   <section class="card danger-zone"><div><h2>Gesamten Lernfortschritt zurücksetzen</h2><p class="note">Löscht alle Termine, Scheduler-Zustände und Bewertungen dieser Sammlung. Fragen, Wiederholungszeit-Einstellungen und heruntergeladene Backups bleiben erhalten.</p></div><button class="button danger" type="button" data-reset-all-progress>Gesamten Lernfortschritt löschen</button></section>`);
   wireFileButtons();
   wireSchedulerSettings();
@@ -384,15 +385,21 @@ function wireSchedulerSettings() {
   form?.addEventListener('submit', async event => {
     event.preventDefault();
     const data = new FormData(form);
-    const scheduler = Object.fromEntries(Object.keys(DEFAULT_SCHEDULER_SETTINGS).map(key => [key, Number(data.get(key))]));
-    if (scheduler.firstLearningMinutes * 60 >= scheduler.secondLearningHours * 3600
-        || scheduler.secondLearningHours * 3600 >= scheduler.thirdLearningDays * 86400) {
-      setFlash('Die drei Lernstufen müssen in zeitlich aufsteigender Reihenfolge liegen.', 'error');
+    const scheduler = {
+      requestRetentionPercent: Number(data.get('requestRetentionPercent')),
+      maximumIntervalDays: Number(data.get('maximumIntervalDays')),
+      learningSteps: String(data.get('learningSteps') || ''),
+      relearningSteps: String(data.get('relearningSteps') || ''),
+      enableFuzz: data.get('enableFuzz') === 'on',
+      learnAheadMinutes: Number(data.get('learnAheadMinutes')),
+    };
+    if (!isValidStepList(scheduler.learningSteps) || !isValidStepList(scheduler.relearningSteps)) {
+      setFlash('Lernschritte müssen aufsteigend als Zeitwerte wie „1m, 10m, 1d“ angegeben werden.', 'error');
       return settingsPage();
     }
     workspace.settings = {...(workspace.settings || {}), scheduler: normalizeSchedulerSettings(scheduler)};
     await saveWorkspace(workspace);
-    setFlash('Wiederholungszeiten gespeichert.');
+    setFlash('FSRS-Einstellungen gespeichert.');
     settingsPage();
   });
   document.querySelector('[data-reset-scheduler]')?.addEventListener('click', async () => {

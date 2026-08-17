@@ -1,8 +1,9 @@
+import {SCHEDULER_VERSION, SUPPORTED_SCHEDULER_VERSIONS} from './scheduler.js';
+
 export const BANK_FORMAT = 'lerndatenbank.bank';
 export const BACKUP_FORMAT = 'lerndatenbank.backup';
 export const FORMAT_VERSION = 2;
 export const SUPPORTED_FORMAT_VERSIONS = new Set([1, 2]);
-export const SCHEDULER_VERSION = 1;
 const MAX_FILE_BYTES = 250 * 1024 * 1024;
 
 function isObject(value) {
@@ -50,7 +51,7 @@ export function validatePayload(payload) {
   }
   if (payload.format === BACKUP_FORMAT) {
     if (!isObject(payload.progress)) throw new Error('Das Backup enthält keinen Lernfortschritt.');
-    if (payload.progress.schedulerVersion !== SCHEDULER_VERSION) {
+    if (!SUPPORTED_SCHEDULER_VERSIONS.has(payload.progress.schedulerVersion)) {
       throw new Error(`Nicht unterstützte Scheduler-Version: ${payload.progress.schedulerVersion ?? 'unbekannt'}.`);
     }
   }
